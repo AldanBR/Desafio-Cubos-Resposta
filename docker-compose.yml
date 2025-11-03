@@ -1,0 +1,118 @@
+services:
+  db:
+    image: postgres:15.8-alpine
+    container_name: desafio_cubos_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_DB: ${PGDATABASE}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/script.sql:/docker-entrypoint-initdb.d/script.sql
+    networks:
+      - internal_network
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: desafio_cubos_backend
+    restart: always
+    environment:
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${PGDATABASE}
+      PORT: 3000
+    networks:
+      - internal_network
+      - external_network
+      - grafana_network
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: desafio_cubos_frontend
+    restart: always
+    networks:
+      - external_network
+  proxy:
+    image: nginx:alpine
+    container_name: desafio_cubos_proxy
+    restart: always
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    networks:
+      - external_network
+      - grafana_network
+    depends_on:
+      - backend
+      - frontend
+  prometheus:
+    image: prom/prometheus:v2.47.1
+    container_name: desafio_cubos_prometheus
+    restart: always
+    volumes:
+      - ./monitoring/prometheus/prometheus-cfg.yml:/etc/prometheus/prometheus-cfg.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus-cfg.yml'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - grafana_network
+
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: desafio_cubos_grafana
+    restart: always
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3001:3000"
+    networks:
+      - grafana_network
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: desafio_cubos_postgres_exporter
+    restart: always
+    environment:
+      DATA_SOURCE_NAME: postgresql://${PGUSER}:${PGPASSWORD}@db:5432/${PGDATABASE}?sslmode=disable
+    networks:
+      - internal_network
+      - grafana_network
+  nginx_prometheus_exporter:
+    image: nginx/nginx-prometheus-exporter
+    container_name: desafio_cubos_nginx_prometheus_exporter
+    restart: always
+    command:
+      - '-nginx.scrape-uri=http://proxy/nginx_status'
+    networks:
+      - external_network
+      - grafana_network
+    depends_on:
+      - proxy
+networks:
+  internal_network:
+    driver: bridge
+    internal: true
+  external_network:
+    driver: bridge
+  grafana_network:
+    driver: bridge
+volumes:
+  postgres_data: {}
+  prometheus_data: {}
+  grafana_data: {}

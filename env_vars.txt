@@ -1,0 +1,3 @@
+PGUSER=app_desafio_user
+PGPASSWORD=desafio_password_123
+PGDATABASE=desafio_db
